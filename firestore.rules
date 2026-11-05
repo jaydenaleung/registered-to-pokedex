@@ -1,0 +1,130 @@
+rules_version = '2';
+
+// Security rules for Registered-to-Pokédex (see INSTRUCTIONS.md §7.2).
+// Every client write is schema-checked; vote tallies can only move in lock-step
+// with the caller's own voter document, so counters cannot be inflated.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- helpers ----------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isDexId(id) {
+      return id.matches('^[1-9][0-9]{0,3}$') && int(id) <= 1025;
+    }
+
+    function optionalString(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function optionalStringOrNull(data, key, maxLen) {
+      return !(key in data) || data[key] == null || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    // ---------- votes ----------
+    function voterPath(dexId, uid) {
+      return /databases/$(database)/documents/pokemonVotes/$(dexId)/voters/$(uid);
+    }
+
+    function tallyPath(dexId) {
+      return /databases/$(database)/documents/pokemonVotes/$(dexId);
+    }
+
+    function voteBefore(dexId, uid) {
+      return exists(voterPath(dexId, uid)) ? get(voterPath(dexId, uid)).data.value : 0;
+    }
+
+    function voteAfter(dexId, uid) {
+      return existsAfter(voterPath(dexId, uid)) ? getAfter(voterPath(dexId, uid)).data.value : 0;
+    }
+
+    function isUp(v) {
+      return v == 1 ? 1 : 0;
+    }
+
+    function isDown(v) {
+      return v == -1 ? 1 : 0;
+    }
+
+    // True when the tally after this write equals the tally before it plus exactly
+    // the change implied by this user's vote moving from `before` to `after`.
+    function tallyMatchesVote(dexId, uid) {
+      let before = voteBefore(dexId, uid);
+      let after = voteAfter(dexId, uid);
+      let tallyBefore = exists(tallyPath(dexId)) ? get(tallyPath(dexId)).data : {'up': 0, 'down': 0};
+      let tallyAfter = getAfter(tallyPath(dexId)).data;
+      return before != after
+        && tallyAfter.up == tallyBefore.up + isUp(after) - isUp(before)
+        && tallyAfter.down == tallyBefore.down + isDown(after) - isDown(before);
+    }
+
+    match /pokemonVotes/{dexId} {
+      allow read: if true;
+      allow create, update: if signedIn()
+        && isDexId(dexId)
+        && request.resource.data.keys().hasOnly(['up', 'down'])
+        && request.resource.data.up is int
+        && request.resource.data.down is int
+        && tallyMatchesVote(dexId, request.auth.uid);
+      allow delete: if false;
+
+      match /voters/{uid} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && isDexId(dexId)
+          && request.resource.data.keys().hasOnly(['value', 'at'])
+          && request.resource.data.value in [1, -1]
+          && request.resource.data.at == request.time
+          && tallyMatchesVote(dexId, uid);
+        allow delete: if isOwner(uid) && tallyMatchesVote(dexId, uid);
+      }
+    }
+
+    // ---------- trainer profiles & caught logs ----------
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['displayName', 'photoURL', 'createdAt', 'updatedAt'])
+        && optionalStringOrNull(request.resource.data, 'displayName', 80)
+        && optionalStringOrNull(request.resource.data, 'photoURL', 1000)
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.updatedAt == request.time
+        && (resource == null || request.resource.data.createdAt == resource.data.createdAt);
+      allow delete: if isOwner(uid);
+
+      match /caught/{dexId} {
+        allow read: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && isDexId(dexId)
+          && request.resource.data.keys().hasOnly(
+               ['dexId', 'name', 'caughtAt', 'loggedAt', 'nickname', 'location', 'note', 'shiny'])
+          && request.resource.data.dexId == int(dexId)
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 40
+          && request.resource.data.caughtAt is timestamp
+          && request.resource.data.loggedAt is timestamp
+          && optionalString(request.resource.data, 'nickname', 24)
+          && optionalString(request.resource.data, 'location', 60)
+          && optionalString(request.resource.data, 'note', 280)
+          && (!('shiny' in request.resource.data) || request.resource.data.shiny is bool);
+        allow delete: if isOwner(uid);
+      }
+    }
+
+    // ---------- Professor's Notes (written only by Cloud Functions / Admin SDK) ----------
+    match /aiLore/{dexId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /aiLoreLocks/{dexId} {
+      allow read, write: if false;
+    }
+  }
+}

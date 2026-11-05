@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-11-05T17:58:08.291Z",
+  "species": 1025,
+  "sources": {
+    "pokeapi": "https://github.com/PokeAPI/pokeapi (data/v2/csv)",
+    "cards": "https://github.com/PokemonTCG/pokemon-tcg-data",
+    "sprites": "https://github.com/PokeAPI/sprites",
+    "artwork": "https://archives.bulbagarden.net"
+  },
+  "coverage": {
+    "cards": 1025,
+    "bwAnim": 868,
+    "showdownAnim": 149,
+    "noAnim": 8,
+    "moves": 1025,
+    "spriteListExact": true,
+    "tcgCardsIndexed": 17405
+  }
+}
