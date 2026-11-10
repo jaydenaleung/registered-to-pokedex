@@ -13,7 +13,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { subscribeCaught, type CaughtEntry } from "./caught";
 import { useGames } from "./data";
 import type { GameDef } from "./types";
-import { auth, db, USE_EMULATORS } from "./firebase";
+import { auth, db, FIREBASE_CONFIGURED, USE_EMULATORS } from "./firebase";
 
 /** Signed-in trainer, their caught log, and per-browser preferences. */
 
@@ -84,6 +84,7 @@ const inIframe = () => {
  * and lists the authorised domains otherwise.
  */
 async function diagnoseAuthSetup(): Promise<string | null> {
+  if (!FIREBASE_CONFIGURED) return null;
   try {
     const res = await fetch(`https://identitytoolkit.googleapis.com/v1/projects?key=${encodeURIComponent(auth.app.options.apiKey ?? "")}`);
     const body = (await res.json()) as { error?: { message?: string }; authorizedDomains?: string[] };
@@ -175,6 +176,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(async () => {
     setAuthError(null);
+    if (!FIREBASE_CONFIGURED && !USE_EMULATORS) {
+      setAuthError("Sign-in isn't set up in this build. Site owner: add the Firebase config to .env.local (see .env.example) and rebuild.");
+      return;
+    }
     const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: "select_account" });
     try {

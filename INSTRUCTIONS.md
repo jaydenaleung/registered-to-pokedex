@@ -249,21 +249,26 @@ Two scenarios are shown:
 
 ## 7. Firebase
 
-### 7.1 Project config (web config is public by design; it lives in `src/lib/firebase.ts`)
+### 7.1 Project config and secrets policy
 
-```js
-const firebaseConfig = {
-  apiKey: "AIzaSyA2cYPuhEcCKg3J_uSMVeYtDiO_YhC6HSs",
-  authDomain: "registered-to-pokedex.firebaseapp.com",
-  projectId: "registered-to-pokedex",
-  storageBucket: "registered-to-pokedex.firebasestorage.app",
-  messagingSenderId: "811588813548",
-  appId: "1:811588813548:web:b02496a9050fcb485b1bc9",
-  measurementId: "G-JGSCJWTTBP"
-};
-```
+**No key, token or credential is ever committed to this repository**, the Firebase web config included.
 
-Security comes from Firestore rules and authorised domains, not from hiding this config.
+- The Firebase web config is read from environment variables at build time:
+  - `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`
+  - `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`
+  - `VITE_FIREBASE_MEASUREMENT_ID`
+- Copy `.env.example` (empty placeholders, committed) to **`.env.local`** (gitignored). Fill it in from Firebase console → Project settings → General → Your apps → *SDK setup and configuration*.
+- Without a config the site still builds and runs: browsing works, and sign-in, votes and catch logs are switched off.
+- Emulator mode (`VITE_USE_EMULATORS=1`) uses the offline `demo-registered-pokedex` project and needs no config.
+- The Claude API key lives only in Firebase Secret Manager (§6).
+- **Guards**: `scripts/check-secrets.mjs` scans for API keys, tokens, private keys and env files.
+  - It runs in `npm test` (`src/lib/secrets.test.ts`), as `npm run check:secrets`, and as a git pre-commit hook (`.githooks/pre-commit`).
+  - `npm install` switches the hook on through the `prepare` script.
+- A Firebase web API key always ships inside the built site, because browsers need it to reach Firebase. Protect it in Google Cloud console → APIs & Services → Credentials:
+  - **Application restrictions**: HTTP referrers limited to the site's domains (e.g. `registered-to-pokedex.web.app/*`, `registered-to-pokedex.firebaseapp.com/*`, `localhost:5173/*`).
+  - **API restrictions**: only the Firebase APIs the app uses (Identity Toolkit, Token Service, Cloud Firestore, Firebase Installations, Firebase Analytics).
+- Turn on GitHub **push protection** for secret scanning so a leaked key is refused at push time.
+- If a key ever leaks, **rotate it first**. Removing it from the code doesn't make it secret again.
 
 ### 7.2 Firestore data model
 
@@ -297,7 +302,7 @@ Security comes from Firestore rules and authorised domains, not from hiding this
 
 **Sign-in troubleshooting**: when a sign-in fails, the app asks Firebase Auth's public project endpoint what's wrong and shows a specific message: Auth not switched on, Google provider disabled, domain not authorised, pop-up blocked, or embedded browser.
 
-**Local development against emulators**: start them with `firebase emulators:start --only auth,firestore,functions`, then run `VITE_USE_EMULATORS=1 npm run dev`. The functions emulator reads `ANTHROPIC_API_KEY` from the gitignored `functions/.secret.local`.
+**Local development against emulators**: start them with `firebase emulators:start --only auth,firestore,functions --project demo-registered-pokedex`, then run `VITE_USE_EMULATORS=1 npm run dev`. The functions emulator reads `ANTHROPIC_API_KEY` from the gitignored `functions/.secret.local`.
 
 ---
 
@@ -307,7 +312,10 @@ Security comes from Firestore rules and authorised domains, not from hiding this
 INSTRUCTIONS.md        this spec
 README.md              quick start
 firebase.json          hosting (dist/, SPA rewrite, caching headers), firestore, functions
-.firebaserc            default project: registered-to-pokedex
+.firebaserc            default project id (an identifier, not a key)
+.env.example           empty Firebase config placeholders (real values go in .env.local, gitignored)
+.githooks/pre-commit   blocks commits containing secrets
+scripts/check-secrets.mjs  secret scanner (npm run check:secrets, npm test, pre-commit)
 firestore.rules        security rules (§7.2)
 firestore.indexes.json
 tests/firestore.rules.test.ts  security-rule tests (npm run test:rules, Firestore emulator)
@@ -357,7 +365,8 @@ functions/
 - [x] The search grammar in §2.3 works, the dropdowns stay in sync, and RANDOM works.
 - [x] Pokéball throw animation plays on page open and on THROW AGAIN.
 - [x] Signed-in users can vote (one vote each, changeable or removable) and can log, edit or release catches. The profile count updates live.
-- [x] No Pokémon images in the repo or database (only URLs; the one asset is a hand-drawn favicon). No Claude API key anywhere in the repo or bundle.
+- [x] No Pokémon images in the repo or database (only URLs; the one asset is a hand-drawn favicon).
+- [x] No API key of any kind in the repo (Firebase config in `.env.local`, Claude key in Secret Manager). Enforced by `npm test` and the pre-commit hook (§7.1).
 - [x] Usable at 375 px width with no horizontal page scroll. Keyboard-navigable, with visible focus.
 
 ---
