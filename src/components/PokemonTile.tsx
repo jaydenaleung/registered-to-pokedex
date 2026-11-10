@@ -3,9 +3,10 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { catchTier } from "../lib/catchRate";
 import { score } from "../lib/search";
-import { animatedSprite, staticSprites } from "../lib/sprites";
+import { useGame } from "../lib/session";
+import { speciesMon, tileSprites } from "../lib/sprites";
 import type { SpeciesSummary, VoteTally } from "../lib/types";
-import { dexNo, Img, TypeBadge, TypePip, useGhost } from "./basics";
+import { dexNo, SpriteImg, TypeBadge, TypePip, useGhost } from "./basics";
 import { StatBars } from "./StatBars";
 
 const QUICK_LOOK_DELAY = 600;
@@ -54,8 +55,8 @@ export function PokemonTile({ species, caught, tally }: TileProps) {
     };
   }, [anchor]);
 
-  const anim = animatedSprite(species);
-  const sprites = staticSprites(species.id);
+  const game = useGame();
+  const sprite = tileSprites(speciesMon(species), game);
   const onEnter = (e: PointerEvent) => {
     if (e.pointerType === "mouse" || e.pointerType === "pen") start();
   };
@@ -79,15 +80,8 @@ export function PokemonTile({ species, caught, tally }: TileProps) {
             ✓
           </span>
         )}
-        <span className={`tile__sprite${active && !anim ? " tile__sprite--hop" : ""}`}>
-          <Img
-            sources={active && anim ? [anim, ...sprites] : sprites}
-            alt=""
-            loading="lazy"
-            width={96}
-            height={96}
-            fallback={<span className="tile__missing">?</span>}
-          />
+        <span className="tile__sprite">
+          <SpriteImg set={sprite} active={active} size={96} />
         </span>
         <span className="tile__name">{species.name}</span>
         <span className="tile__types">
@@ -125,6 +119,7 @@ function QuickLook({ species, anchor, caught, tally }: TileProps & { anchor: DOM
         ))}
         {flag && <span className="flag-chip">{flag}</span>}
       </div>
+      {species.forms && <div className="quicklook__forms">FORMS: {species.forms.map(formTagLabel).join(" · ")}</div>}
       <StatBars stats={species.stats} compact />
       <div className="quicklook__foot">
         <span>
@@ -138,3 +133,16 @@ function QuickLook({ species, anchor, caught, tally }: TileProps & { anchor: DOM
     </div>
   );
 }
+
+const FORM_TAG_LABELS: Record<string, string> = {
+  alola: "Alolan",
+  galar: "Galarian",
+  hisui: "Hisuian",
+  paldea: "Paldean",
+  mega: "Mega",
+  primal: "Primal",
+  gmax: "Gigantamax",
+  other: "Other",
+};
+
+export const formTagLabel = (tag: string) => FORM_TAG_LABELS[tag] ?? tag;

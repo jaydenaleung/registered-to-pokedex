@@ -1,4 +1,4 @@
-# Registered Pokédex
+# Registered To Pokédex
 
 A pixel-art Pokédex for all 1025 Pokémon, styled as the original red device and laid out as a book you flip through.
 
@@ -7,6 +7,9 @@ A pixel-art Pokédex for all 1025 Pokémon, styled as the original red device an
   - a tag cloud: type, weaknesses, age, catch difficulty, legendary/mythical status and more
   - lore, moves and evolution line
   - a Poké Ball throw animation
+- **Forms**: switch any page to its Alolan, Galarian, Hisuian, Paldean, Mega, Primal, Gigantamax or other form (295 in all).
+- **Game modes**: the GAME menu reskins the whole Pokédex as any of 22 games, from Red/Blue to Pokémon Champions. It changes the sprites, cries, Pokédex text, device colours, and which Pokémon are listed.
+- **Battle simulator (beta)**: pick any two Pokémon or forms, a level and up to 4 moves, then battle with Gen V+ mechanics.
 - Index pages show pixel sprites that animate on hover, with a quick-look popup.
 - Signed-in trainers can **vote** on Pokémon and **log catches**. Their trainer card counts how many they've caught.
 - **Professor's Notes**: a short field guide for each species written by Claude through a Cloud Function, written once and cached for everyone.
@@ -64,9 +67,9 @@ The functions emulator reads the Claude key from `functions/.secret.local` (giti
 ## Deploying (project owner)
 
 1. In the Firebase console for `registered-to-pokedex`:
-   - Authentication → Sign-in method → enable **Google**.
-   - Add your hosting domain under *Authorised domains*.
-   - Firestore → create the database in **production mode**.
+   - **Authentication → Get started**, then Sign-in method → enable **Google**. Sign-in fails with "Sign-in isn't switched on" until this is done.
+   - Add any custom domain under Authentication → Settings → *Authorized domains*. `localhost`, `*.web.app` and `*.firebaseapp.com` are allowed by default.
+   - Firestore → create the database in **production mode**. Votes only work once the rules below are deployed.
 2. Deploy the rules and the site:
    ```bash
    firebase login

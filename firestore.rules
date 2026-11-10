@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Security rules for Registered-to-Pokédex (see INSTRUCTIONS.md §7.2).
+// Security rules for Registered To Pokédex (see INSTRUCTIONS.md §7.2).
 // Every client write is schema-checked; vote tallies can only move in lock-step
 // with the caller's own voter document, so counters cannot be inflated.
 service cloud.firestore {

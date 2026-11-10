@@ -4,15 +4,19 @@ import { Book, type Spread } from "./components/Book";
 import { DexShell } from "./components/DexShell";
 import { dexNo, Loading } from "./components/basics";
 import { useIndex, useTypes } from "./lib/data";
+import { themeStyle } from "./lib/gameThemes";
 import { applyQuery, isEmptyQuery, parseQuery } from "./lib/search";
-import { SessionProvider, useSession } from "./lib/session";
+import { SessionProvider, useGame, useSession } from "./lib/session";
+import { inGame } from "./lib/sprites";
 import { useVoteTotals } from "./lib/votes";
 import { IndexSide, PER_PAGE, PER_SPREAD } from "./pages/IndexPage";
 import { NotFoundLeft, NotFoundRight } from "./pages/NotFoundPage";
 import { PokemonLeft, PokemonRight } from "./pages/PokemonPage";
 import { TrainerLeft, TrainerRight } from "./pages/TrainerPage";
+import { BattleLeft, BattleRight } from "./pages/BattlePage";
 
 const MAX_ID = 1025;
+export const SITE_NAME = "Registered To Pokédex";
 
 function indexUrl(q: string, page: number) {
   const params = new URLSearchParams();
@@ -36,20 +40,36 @@ function DexApp() {
   const { data: index, error: indexError } = useIndex();
   const { data: types } = useTypes();
   const { caught } = useSession();
+  const game = useGame();
   const { totals, status: votesStatus } = useVoteTotals();
   const lastIndexUrl = useRef("/");
 
   const params = new URLSearchParams(location.search);
   const q = params.get("q") ?? "";
+  const formParam = Number(params.get("form"));
+  const formPid = Number.isInteger(formParam) && formParam > MAX_ID ? formParam : null;
   const parsed = useMemo(() => parseQuery(q), [q]);
   const caughtIds = useMemo(() => new Set(caught.keys()), [caught]);
+  // In a game mode, the book only lists Pokémon that appear in that game.
+  const dex = useMemo(() => (index && game ? index.filter((s) => inGame(game, s.id)) : index), [index, game]);
   const results = useMemo(
-    () => (index ? applyQuery(index, parsed, { chart: types?.chart, votes: totals, caught: caughtIds }) : []),
-    [index, parsed, types, totals, caughtIds],
+    () => (dex ? applyQuery(dex, parsed, { chart: types?.chart, votes: totals, caught: caughtIds }) : []),
+    [dex, parsed, types, totals, caughtIds],
   );
 
   const onIndexRoute = location.pathname === "/";
   if (onIndexRoute) lastIndexUrl.current = `${location.pathname}${location.search}`;
+
+  // Flipping from a Pokémon page walks the National Dex, or the selected game's dex.
+  const neighbours = (id: number): { prev: string | null; next: string | null } => {
+    if (game && dex) {
+      const i = dex.findIndex((s) => s.id === id);
+      const before = i > 0 ? dex[i - 1] : i < 0 ? [...dex].reverse().find((s) => s.id < id) : undefined;
+      const after = i >= 0 ? dex[i + 1] : dex.find((s) => s.id > id);
+      return { prev: before ? `/pokemon/${before.id}` : lastIndexUrl.current, next: after ? `/pokemon/${after.id}` : null };
+    }
+    return { prev: id > 1 ? `/pokemon/${id - 1}` : lastIndexUrl.current, next: id < MAX_ID ? `/pokemon/${id + 1}` : null };
+  };
 
   const resolved: Resolved = useMemo(() => {
     const pokemonMatch = matchPath("/pokemon/:id", location.pathname);
@@ -78,7 +98,7 @@ function DexApp() {
         pageLabel: index ? `PAGE ${page}/${spreads}` : "LOADING",
         prev: page > 1 ? indexUrl(q, page - 1) : null,
         next: page < spreads ? indexUrl(q, page + 1) : index && results.length ? `/pokemon/${results[0].id}` : null,
-        title: q ? `“${q}” · Pokédex` : "Pokédex",
+        title: q ? `“${q}” · ${SITE_NAME}` : SITE_NAME,
       };
     }
     if (pokemonMatch) {
@@ -100,7 +120,7 @@ function DexApp() {
           pageLabel: "LOADING",
           prev: null,
           next: null,
-          title: "Pokédex",
+          title: SITE_NAME,
         };
       }
       if (species) {
@@ -108,15 +128,33 @@ function DexApp() {
           spread: {
             key: `pokemon:${species.id}`,
             order: 100 + species.id,
-            left: <PokemonLeft species={species} />,
-            right: <PokemonRight species={species} />,
+            left: <PokemonLeft species={species} formPid={formPid} />,
+            right: <PokemonRight species={species} formPid={formPid} />,
           },
           pageLabel: `${dexNo(species.id)}`,
-          prev: species.id > 1 ? `/pokemon/${species.id - 1}` : lastIndexUrl.current,
-          next: species.id < MAX_ID ? `/pokemon/${species.id + 1}` : null,
-          title: `${species.name} · ${dexNo(species.id)} · Pokédex`,
+          ...neighbours(species.id),
+          title: `${species.name} · ${dexNo(species.id)} · ${SITE_NAME}`,
         };
       }
+    }
+    if (location.pathname === "/battle") {
+      const num = (k: string) => {
+        const v = Number(params.get(k));
+        return Number.isInteger(v) && v > 0 ? v : 0;
+      };
+      const level = Math.min(100, num("lv") || 50);
+      return {
+        spread: {
+          key: "battle",
+          order: 4000,
+          left: <BattleLeft />,
+          right: <BattleRight player={num("p") || 25} foe={num("o")} level={level} />,
+        },
+        pageLabel: "BATTLE β",
+        prev: lastIndexUrl.current,
+        next: null,
+        title: `Battle (beta) · ${SITE_NAME}`,
+      };
     }
     if (location.pathname === "/trainer") {
       return {
@@ -124,7 +162,7 @@ function DexApp() {
         pageLabel: "TRAINER",
         prev: lastIndexUrl.current,
         next: null,
-        title: "Trainer card · Pokédex",
+        title: `Trainer card · ${SITE_NAME}`,
       };
     }
     return {
@@ -132,10 +170,10 @@ function DexApp() {
       pageLabel: "No.???",
       prev: "/",
       next: null,
-      title: "MissingNo. · Pokédex",
+      title: `MissingNo. · ${SITE_NAME}`,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, location.search, results, index, indexError, caughtIds, totals, votesStatus]);
+  }, [location.pathname, location.search, results, index, dex, indexError, caughtIds, totals, votesStatus]);
 
   useEffect(() => {
     document.title = resolved.title;
@@ -153,17 +191,18 @@ function DexApp() {
   const randomPool = onIndexRoute && !isEmptyQuery(parsed) && results.length ? results : null;
   const onRandom = useCallback(() => {
     const current = matchPath("/pokemon/:id", location.pathname)?.params.id;
-    const pool = randomPool ?? index;
+    const pool = randomPool ?? dex;
     if (!pool?.length) return;
     let pick = pool[Math.floor(Math.random() * pool.length)];
     if (pool.length > 1 && String(pick.id) === current) pick = pool[(pool.indexOf(pick) + 1) % pool.length];
     navigate(`/pokemon/${pick.id}`);
-  }, [randomPool, index, location.pathname, navigate]);
+  }, [randomPool, dex, location.pathname, navigate]);
 
   const { prev, next } = resolved;
   return (
     <DexShell
-      index={index}
+      index={dex}
+      themeStyle={themeStyle(game?.id ?? null)}
       pageLabel={resolved.pageLabel}
       onPrev={prev ? () => navigate(prev) : null}
       onNext={next ? () => navigate(next) : null}

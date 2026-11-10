@@ -2,10 +2,11 @@ import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent 
 import { useLocation, useNavigate } from "react-router-dom";
 import { GEN_REGION, romanGen } from "../lib/age";
 import { exactMatch, getToken, setToken, SORT_LABELS, suggestions, type SortKey } from "../lib/search";
-import { staticSprites } from "../lib/sprites";
+import { useGame } from "../lib/session";
+import { tileSprites } from "../lib/sprites";
 import { TYPE_IDS } from "../lib/typeChart";
 import type { SpeciesSummary } from "../lib/types";
-import { dexNo, Img } from "./basics";
+import { dexNo, SpriteImg } from "./basics";
 
 /** Search bar + Type/Gen/Sort dropdowns + help (INSTRUCTIONS.md §2.3). */
 
@@ -15,6 +16,8 @@ const HELP: [string, string][] = [
   ["fire  ·  type:fire type:flying", "type(s)"],
   ["gen:3  ·  gen3  ·  hoenn", "generation / region"],
   ["legendary  ·  mythical  ·  baby", "special status"],
+  ["alolan · galarian · hisuian · paldean", "regional forms"],
+  ["mega  ·  gmax  ·  primal  ·  forms", "other forms"],
   ["weak:ice", "takes ≥2× from Ice"],
   ["caught  ·  missing", "your caught log"],
   ["sort:popular  ·  sort:unpopular", "by votes"],
@@ -33,6 +36,7 @@ export function SearchBar({ index }: { index: SpeciesSummary[] | undefined }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const listId = useId();
+  const game = useGame();
 
   // Keep the box in sync when the URL query changes (back button, dropdowns, links).
   useEffect(() => {
@@ -157,7 +161,7 @@ export function SearchBar({ index }: { index: SpeciesSummary[] | undefined }) {
                     navigate(`/pokemon/${s.id}`);
                   }}
                 >
-                  <Img sources={staticSprites(s.id)} alt="" width={40} height={40} />
+                  <SpriteImg set={tileSprites({ pid: s.id, anim: null }, game)} size={40} />
                   <span className="search__sugg-no">{dexNo(s.id)}</span>
                   {s.name}
                 </button>

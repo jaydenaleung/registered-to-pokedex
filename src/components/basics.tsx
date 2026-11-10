@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ImgHTMLAttributes, type ReactNode } from "react";
+import type { SpriteSet } from "../lib/sprites";
 import { TYPE_COLORS } from "../lib/typeChart";
 
 /** True inside a static "ghost" copy of a page shown during a page flip. */
@@ -29,6 +30,46 @@ export function Img({ sources, fallback = null, onError, ...rest }: ImgProps) {
         setIndex((i) => i + 1);
         onError?.(e);
       }}
+    />
+  );
+}
+
+/** A Pokémon sprite from a SpriteSet: still by default, animated when `active`. */
+export function SpriteImg({
+  set,
+  active = false,
+  className = "",
+  alt = "",
+  size,
+  eager = false,
+}: {
+  set: SpriteSet;
+  active?: boolean;
+  className?: string;
+  alt?: string;
+  size?: number;
+  eager?: boolean;
+}) {
+  const animating = active && !!set.active;
+  const classes = [
+    "sprite",
+    set.fit ? "sprite--fit" : "",
+    set.smooth ? "sprite--smooth" : "",
+    set.missing ? "sprite--missing" : "",
+    active && !set.active ? "sprite--hop" : "",
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <Img
+      className={classes}
+      sources={animating ? set.active! : set.still}
+      alt={alt}
+      loading={eager ? "eager" : "lazy"}
+      width={size}
+      height={size}
+      fallback={<span className="sprite__missing">?</span>}
     />
   );
 }

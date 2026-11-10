@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Data pipeline for Registered-to-Pokédex (INSTRUCTIONS.md §4).
+ * Data pipeline for Registered To Pokédex (INSTRUCTIONS.md §4).
  *
  * Downloads open data (PokeAPI CSV dump, PokemonTCG card dataset, PokeAPI sprite tree)
  * into .cache/, then writes compact JSON into public/data/ and the Professor's fact sheet
@@ -34,7 +34,7 @@ const CSV_FILES = [
   "pokemon_moves", "pokemon_evolution", "evolution_trigger_prose", "item_names",
   "version_groups", "versions", "version_names", "pokemon_egg_groups", "egg_group_prose",
   "pokemon_habitat_names", "pokemon_color_names", "pokemon_shape_prose", "growth_rate_prose",
-  "location_names",
+  "location_names", "pokemon_forms", "pokemon_form_names", "move_meta", "move_meta_stat_changes",
 ];
 
 // ---------------------------------------------------------------- utilities
@@ -173,33 +173,122 @@ async function downloadAll() {
   return sets;
 }
 
-/** Which National Dex numbers have BW-animated / Showdown-animated sprites. */
-function spriteAvailability() {
+/**
+ * Lists which sprite files exist in the PokeAPI/sprites repo, using a tree-only clone
+ * (no image data is downloaded). Returns a lister: (dir, ext) -> Set of ids (incl. form ids).
+ */
+function spriteTree() {
   const dir = path.join(CACHE, "sprites-tree");
-  const listDir = (sub) =>
-    new Set(
-      execFileSync("git", ["-C", dir, "ls-tree", "--name-only", "HEAD", `${sub}/`], { encoding: "utf8" })
-        .split("\n")
-        .map((p) => p.split("/").pop())
-        .filter((f) => /^\d+\.gif$/.test(f))
-        .map((f) => Number(f.replace(".gif", ""))),
-    );
   try {
     if (!fs.existsSync(path.join(dir, ".git")) || REFRESH) {
       fs.rmSync(dir, { recursive: true, force: true });
       log("cloning PokeAPI/sprites tree (no blobs)…");
       execFileSync("git", ["clone", "-q", "--filter=blob:none", "--no-checkout", "--depth", "1", SPRITES_REPO, dir]);
     }
-    return {
-      bw: listDir("sprites/pokemon/versions/generation-v/black-white/animated"),
-      showdown: listDir("sprites/pokemon/other/showdown"),
-      exact: true,
+    const cache = new Map();
+    const list = (sub, ext) => {
+      const key = `${sub}|${ext}`;
+      if (!cache.has(key)) {
+        const re = new RegExp(`^(\\d+)\\.${ext}$`);
+        cache.set(
+          key,
+          new Set(
+            execFileSync("git", ["-C", dir, "ls-tree", "--name-only", "HEAD", `sprites/pokemon/${sub}/`], {
+              encoding: "utf8",
+              maxBuffer: 64 * 1024 * 1024,
+            })
+              .split("\n")
+              .map((p) => re.exec(p.split("/").pop() ?? ""))
+              .filter(Boolean)
+              .map((m) => Number(m[1])),
+          ),
+        );
+      }
+      return cache.get(key);
     };
+    return { list, exact: true };
   } catch (err) {
-    log(`sprite tree unavailable (${err.message.split("\n")[0]}); assuming BW anim for #1–649, Showdown otherwise`);
-    const range = (a, b) => new Set(Array.from({ length: b - a + 1 }, (_, i) => a + i));
-    return { bw: range(1, 649), showdown: range(1, MAX_ID), exact: false };
+    log(`sprite tree unavailable (${err.message.split("\n")[0]}); assuming full coverage`);
+    const all = new Set(Array.from({ length: MAX_ID }, (_, i) => i + 1));
+    return { list: () => all, exact: false };
   }
+}
+
+/** Per-game sprite sets (INSTRUCTIONS.md §11). Paths are relative to sprites/pokemon/versions. */
+const GAMES = [
+  { id: "rb", name: "Red / Blue", gen: 1, year: 1996, versions: ["Red", "Blue"], front: "generation-i/red-blue/transparent", back: "generation-i/red-blue/transparent/back" },
+  { id: "yellow", name: "Yellow", gen: 1, year: 1998, versions: ["Yellow"], front: "generation-i/yellow/transparent", back: "generation-i/yellow/transparent/back" },
+  { id: "gold", name: "Gold", gen: 2, year: 1999, versions: ["Gold"], front: "generation-ii/gold/transparent", back: "generation-ii/gold/transparent/back" },
+  { id: "silver", name: "Silver", gen: 2, year: 1999, versions: ["Silver"], front: "generation-ii/silver/transparent", back: "generation-ii/silver/transparent/back" },
+  { id: "crystal", name: "Crystal", gen: 2, year: 2000, versions: ["Crystal"], front: "generation-ii/crystal/transparent", back: "generation-ii/crystal/transparent/back", anim: "generation-ii/crystal/animated", animExt: "gif" },
+  { id: "rs", name: "Ruby / Sapphire", gen: 3, year: 2002, versions: ["Ruby", "Sapphire"], front: "generation-iii/ruby-sapphire", back: "generation-iii/ruby-sapphire/back" },
+  { id: "emerald", name: "Emerald", gen: 3, year: 2004, versions: ["Emerald"], front: "generation-iii/emerald", back: "generation-iii/emerald/back", anim: "generation-iii/emerald/animated", animExt: "png" },
+  { id: "frlg", name: "FireRed / LeafGreen", gen: 3, year: 2004, versions: ["FireRed", "LeafGreen"], front: "generation-iii/firered-leafgreen", back: "generation-iii/firered-leafgreen/back" },
+  { id: "dp", name: "Diamond / Pearl", gen: 4, year: 2006, versions: ["Diamond", "Pearl"], front: "generation-iv/diamond-pearl", back: "generation-iv/diamond-pearl/back", anim: "generation-iv/diamond-pearl/animated", animExt: "png" },
+  { id: "pt", name: "Platinum", gen: 4, year: 2008, versions: ["Platinum"], front: "generation-iv/platinum", back: "generation-iv/platinum/back", anim: "generation-iv/platinum/animated", animExt: "png" },
+  { id: "hgss", name: "HeartGold / SoulSilver", gen: 4, year: 2009, versions: ["HeartGold", "SoulSilver"], front: "generation-iv/heartgold-soulsilver", back: "generation-iv/heartgold-soulsilver/back", anim: "generation-iv/heartgold-soulsilver/animated", animExt: "png" },
+  { id: "bw", name: "Black / White", gen: 5, year: 2010, versions: ["Black", "White", "Black 2", "White 2"], front: "generation-v/black-white", back: "generation-v/black-white/back", anim: "generation-v/black-white/animated", animExt: "gif", animBack: "generation-v/black-white/animated/back" },
+  { id: "xy", name: "X / Y", gen: 6, year: 2013, versions: ["X", "Y"], front: "generation-vi/x-y", back: "generation-vi/x-y/back" },
+  { id: "oras", name: "Omega Ruby / Alpha Sapphire", gen: 6, year: 2014, versions: ["Omega Ruby", "Alpha Sapphire"], front: "generation-vi/omega-ruby-alpha-sapphire", back: "generation-vi/omega-ruby-alpha-sapphire/back" },
+  { id: "usum", name: "Ultra Sun / Ultra Moon", gen: 7, year: 2017, versions: ["Ultra Sun", "Ultra Moon", "Sun", "Moon"], front: "generation-vii/ultra-sun-ultra-moon", ext: "gif", back: "generation-vii/ultra-sun-ultra-moon/back", backExt: "gif", icon: "generation-vii/icons" },
+  { id: "lgpe", name: "Let's Go Pikachu / Eevee", gen: 7, year: 2018, versions: ["Let’s Go, Pikachu!", "Let’s Go, Eevee!"], front: "generation-vii/lets-go-pikachu-lets-go-eevee", ext: "gif", back: "generation-vii/lets-go-pikachu-lets-go-eevee/back", backExt: "gif", icon: "generation-vii/lets-go-pikachu-lets-go-eevee/icons" },
+  { id: "swsh", name: "Sword / Shield", gen: 8, year: 2019, versions: ["Sword", "Shield"], front: "generation-viii/sword-shield", ext: "webp", back: "generation-viii/sword-shield/back", backExt: "webp", icon: "generation-viii/sword-shield/icons" },
+  { id: "bdsp", name: "Brilliant Diamond / Shining Pearl", gen: 8, year: 2021, versions: ["Brilliant Diamond", "Shining Pearl"], front: "generation-viii/brilliant-diamond-shining-pearl", ext: "webp", back: "generation-viii/brilliant-diamond-shining-pearl/back", backExt: "webp", icon: "generation-viii/brilliant-diamond-shining-pearl/icons" },
+  { id: "pla", name: "Legends: Arceus", gen: 8, year: 2022, versions: ["Legends: Arceus"], front: "generation-viii/legends-arceus", ext: "webp", back: "generation-viii/legends-arceus/back", backExt: "webp", icon: "generation-viii/legends-arceus/icons" },
+  { id: "sv", name: "Scarlet / Violet", gen: 9, year: 2022, versions: ["Scarlet", "Violet"], front: "generation-ix/scarlet-violet", ext: "webp", back: "generation-ix/scarlet-violet/back", backExt: "webp", icon: "generation-ix/scarlet-violet/icons" },
+  { id: "za", name: "Legends: Z-A", gen: 9, year: 2025, versions: ["Legends: Z-A"], front: "generation-ix/legends-za", ext: "webp", back: "generation-ix/legends-za/back", backExt: "webp", icon: "generation-ix/legends-za/icons" },
+  { id: "champions", name: "Pokémon Champions", gen: 9, year: 2026, versions: ["Champions"], front: "generation-ix/champions", ext: "webp", back: "generation-ix/champions/back", backExt: "webp", icon: "generation-ix/champions/icons" },
+];
+
+/** Varieties left out of the form switcher: event costumes, totems and duplicates. */
+const FORM_EXCLUDE = /-totem|-cap$|-cosplay|-rock-star|-belle|-pop-star|-phd|-libre|-starter$|-power-construct$|-battle-bond$/;
+
+/** Moves whose damage isn't "power"-based, for the battle simulator. */
+const MOVE_FX = {
+  "seismic-toss": "level",
+  "night-shade": "level",
+  "sonic-boom": "fixed20",
+  "dragon-rage": "fixed40",
+  "super-fang": "half",
+  "natures-madness": "half",
+  ruination: "half",
+  "low-kick": "weight",
+  "grass-knot": "weight",
+  "heavy-slam": "heavier",
+  "heat-crash": "heavier",
+  return: "p102",
+  frustration: "p102",
+  flail: "lowhp",
+  reversal: "lowhp",
+  "gyro-ball": "gyro",
+  "electro-ball": "electro",
+  guillotine: "ohko",
+  "horn-drill": "ohko",
+  fissure: "ohko",
+  "sheer-cold": "ohko",
+};
+
+/** Moves that take two turns in battle: charge first, or recharge after. */
+const MOVE_TURN = {
+  "hyper-beam": "recharge", "giga-impact": "recharge", "blast-burn": "recharge", "hydro-cannon": "recharge",
+  "frenzy-plant": "recharge", "rock-wrecker": "recharge", "roar-of-time": "recharge", "prismatic-laser": "recharge",
+  eternabeam: "recharge", "meteor-assault": "recharge",
+  fly: "charge", dig: "charge", dive: "charge", bounce: "charge", "solar-beam": "charge", "solar-blade": "charge",
+  "sky-attack": "charge", "skull-bash": "charge", "razor-wind": "charge", "freeze-shock": "charge", "ice-burn": "charge",
+  "meteor-beam": "charge", "phantom-force": "charge", "shadow-force": "charge", "electro-shot": "charge", geomancy: "charge",
+  "focus-punch": "focus",
+};
+
+/** [[a,b],…] ranges for a sorted id list (compact JSON). */
+function toRanges(ids) {
+  const sorted = [...ids].sort((a, b) => a - b);
+  const out = [];
+  for (const id of sorted) {
+    const last = out[out.length - 1];
+    if (last && id === last[1] + 1) last[1] = id;
+    else out.push([id, id]);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- main build
@@ -218,7 +307,13 @@ const MOVE_GROUP_PREFERENCE = [
 
 async function main() {
   const sets = await downloadAll();
-  const sprites = spriteAvailability();
+  const tree = spriteTree();
+  const sprites = {
+    bw: tree.list("versions/generation-v/black-white/animated", "gif"),
+    bwStatic: tree.list("versions/generation-v/black-white", "png"),
+    showdown: tree.list("other/showdown", "gif"),
+    exact: tree.exact,
+  };
 
   log("parsing CSVs…");
   const species = readCSV("pokemon_species").filter((r) => Number(r.id) <= MAX_ID);
@@ -291,7 +386,6 @@ async function main() {
   const METHOD = { 1: "level", 2: "egg", 3: "tutor", 4: "machine" };
   for (const r of readCSV("pokemon_moves")) {
     const pid = Number(r.pokemon_id);
-    if (pid > MAX_ID) continue;
     const method = METHOD[r.pokemon_move_method_id];
     if (!method) continue;
     if (!learnsets.has(pid)) learnsets.set(pid, new Map());
@@ -516,6 +610,39 @@ async function main() {
 
   // ------------------------------------------------------------ assemble
   log("assembling species…");
+  // ------------------------------------------------------------ forms
+  const formNames = new Map();
+  for (const r of readCSV("pokemon_form_names")) if (r.local_language_id === EN) formNames.set(r.pokemon_form_id, r);
+  const defaultFormOf = new Map(); // pokemon id -> its default pokemon_forms row
+  for (const f of readCSV("pokemon_forms")) if (f.is_default === "1") defaultFormOf.set(f.pokemon_id, f);
+  const varietiesBySpecies = groupBy(
+    pokemonRows.filter((p) => p.is_default === "0" && Number(p.species_id) <= MAX_ID && !FORM_EXCLUDE.test(p.identifier)),
+    "species_id",
+  );
+  const REGION_ADJ = { alola: "Alolan", galar: "Galarian", hisui: "Hisuian", paldea: "Paldean" };
+  const formKind = (ident) => {
+    const region = /-(alola|galar|hisui|paldea)/.exec(ident);
+    if (region) return { kind: "regional", tag: region[1] };
+    if (/-mega/.test(ident)) return { kind: "mega", tag: "mega" };
+    if (/-primal$/.test(ident)) return { kind: "primal", tag: "primal" };
+    if (/-gmax$/.test(ident)) return { kind: "gmax", tag: "gmax" };
+    return { kind: "other", tag: "other" };
+  };
+  const pokemonTypesOf = (pid) =>
+    (pokemonTypes.get(String(pid)) ?? []).sort((a, b) => Number(a.slot) - Number(b.slot)).map((t) => typeIdentifiers.get(t.type_id));
+  const pokemonStatsOf = (pid) =>
+    [1, 2, 3, 4, 5, 6].map((statId) => Number((pokemonStats.get(String(pid)) ?? []).find((r) => r.stat_id === String(statId))?.base_stat ?? 0));
+  const abilitiesOf = (pid) =>
+    (pokemonAbilities.get(String(pid)) ?? [])
+      .sort((a, b) => Number(a.slot) - Number(b.slot))
+      .map((a) => ({
+        name: abilityNames.get(a.ability_id) ?? a.ability_id,
+        hidden: a.is_hidden === "1",
+        description: abilityText.get(a.ability_id)?.text ?? "",
+      }));
+  const animOf = (pid) => (sprites.bw.has(pid) ? "bw" : sprites.showdown.has(pid) ? "sd" : null);
+  const formIndex = [];
+
   fs.mkdirSync(path.join(OUT, "pokemon"), { recursive: true });
   const index = [];
   const facts = {};
@@ -554,6 +681,58 @@ async function main() {
     };
     index.push(record);
 
+    // Alternate forms (regional variants, Mega Evolutions, Gigantamax, other battle forms).
+    const defaultForm = defaultFormOf.get(p.id);
+    const defaultLabel = (defaultForm && formNames.get(defaultForm.id)?.form_name) || null;
+    const formDetails = [];
+    const formTags = new Set();
+    for (const v of (varietiesBySpecies.get(s.id) ?? []).sort((a, b) => Number(a.order) - Number(b.order) || Number(a.id) - Number(b.id))) {
+      const pid = Number(v.id);
+      const f = defaultFormOf.get(v.id);
+      const names = f ? formNames.get(f.id) : null;
+      const { kind, tag } = formKind(v.identifier);
+      formTags.add(tag);
+      const formName =
+        names?.pokemon_name ||
+        (kind === "regional" ? `${REGION_ADJ[tag]} ${speciesName}` : `${speciesName} (${capitalize(v.identifier.split("-").slice(1).join(" "))})`);
+      let label = names?.form_name || capitalize(v.identifier.split("-").slice(1).join(" "));
+      if (kind === "regional") label = label.replace(/ Form\b/, "");
+      if (kind === "mega" || kind === "primal") label = formName.replace(` ${speciesName}`, "").replace(speciesName, "").trim() || label;
+      if (kind === "gmax") label = "Gigantamax";
+      const formMoves = pickLearnset(pid);
+      const adjective = kind === "regional" ? REGION_ADJ[tag] : null;
+      const formCards =
+        kind === "regional"
+          ? (cardsByDex.get(id) ?? []).filter((c) => c.name.startsWith(`${adjective} `))
+          : kind === "mega"
+            ? (cardsByDex.get(id) ?? []).filter((c) => /^(Mega |M )/.test(c.name))
+            : [];
+      formIndex.push({
+        pid,
+        species: id,
+        name: formName,
+        label,
+        kind,
+        types: pokemonTypesOf(pid),
+        stats: pokemonStatsOf(pid),
+        height: Number(v.height),
+        weight: Number(v.weight),
+        anim: animOf(pid),
+        ...(sprites.bwStatic.has(pid) ? { bw: true } : {}),
+        ...(f?.is_battle_only === "1" ? { battleOnly: true } : {}),
+      });
+      formDetails.push({
+        pid,
+        abilities: abilitiesOf(pid),
+        moves: formMoves,
+        cards: formCards
+          .slice()
+          .sort((a, b) => b.date.localeCompare(a.date))
+          .slice(0, 12),
+      });
+    }
+    if (formTags.size) record.forms = [...formTags];
+
     // Pokédex entries: dedupe identical text across games, newest first.
     const entries = new Map();
     for (const r of (flavorBySpecies.get(s.id) ?? []).sort((a, b) => versionOrder(b.version_id) - versionOrder(a.version_id))) {
@@ -563,7 +742,7 @@ async function main() {
       if (!entries.has(key)) entries.set(key, { games: [game], text });
       else if (!entries.get(key).games.includes(game)) entries.get(key).games.push(game);
     }
-    const flavor = [...entries.values()].slice(0, 14);
+    const flavor = [...entries.values()];
 
     const abilities = (pokemonAbilities.get(p.id) ?? [])
       .sort((a, b) => Number(a.slot) - Number(b.slot))
@@ -594,6 +773,8 @@ async function main() {
       evolution,
       moves,
       cards,
+      ...(defaultLabel ? { formLabel: defaultLabel } : {}),
+      ...(formDetails.length ? { forms: formDetails } : {}),
     };
     fs.writeFileSync(path.join(OUT, "pokemon", `${id}.json`), JSON.stringify(detail));
 
@@ -624,11 +805,32 @@ async function main() {
     };
   }
 
-  // Moves dictionary
+  // Moves dictionary: [name, type, category, power, accuracy, pp, priority, battle meta]
+  const moveMeta = new Map(readCSV("move_meta").map((r) => [r.move_id, r]));
+  const moveStatChanges = groupBy(readCSV("move_meta_stat_changes"), "move_id");
   const moveDict = {};
   for (const id of [...usedMoves].sort((a, b) => a - b)) {
     const m = movesData.get(String(id));
     if (!m) continue;
+    const meta = moveMeta.get(String(id));
+    const battle = {};
+    if (meta) {
+      const n = (k) => Number(meta[k] || 0);
+      if (n("meta_category_id")) battle.c = n("meta_category_id");
+      if (n("meta_ailment_id") > 0) battle.a = n("meta_ailment_id");
+      if (n("ailment_chance")) battle.ac = n("ailment_chance");
+      if (meta.min_hits) battle.h = [n("min_hits"), n("max_hits")];
+      if (n("drain")) battle.d = n("drain");
+      if (n("healing")) battle.hl = n("healing");
+      if (n("crit_rate")) battle.cr = n("crit_rate");
+      if (n("flinch_chance")) battle.f = n("flinch_chance");
+      if (n("stat_chance")) battle.sc = n("stat_chance");
+    }
+    const changes = (moveStatChanges.get(String(id)) ?? []).map((r) => [Number(r.stat_id), Number(r.change)]);
+    if (changes.length) battle.s = changes;
+    if (m.target_id === "7") battle.self = 1;
+    if (MOVE_FX[m.identifier]) battle.fx = MOVE_FX[m.identifier];
+    if (MOVE_TURN[m.identifier]) battle.tt = MOVE_TURN[m.identifier];
     moveDict[id] = [
       moveNames.get(String(id)) ?? m.identifier,
       typeIdentifiers.get(m.type_id) ?? "normal",
@@ -636,8 +838,32 @@ async function main() {
       num(m.power),
       num(m.accuracy),
       num(m.pp),
+      Number(m.priority || 0),
+      battle,
     ];
   }
+
+  // Per-game sprite availability (front / back / animation / box icons).
+  const games = GAMES.map((g) => {
+    const ext = g.ext ?? "png";
+    const front = tree.list(`versions/${g.front}`, ext);
+    const out = {
+      id: g.id,
+      name: g.name,
+      gen: g.gen,
+      year: g.year,
+      versions: g.versions,
+      front: g.front,
+      ext,
+      ids: toRanges(front),
+      cry: g.gen <= 5 ? "legacy" : "latest",
+    };
+    if (g.back) Object.assign(out, { back: g.back, backExt: g.backExt ?? ext, backIds: toRanges(tree.list(`versions/${g.back}`, g.backExt ?? ext)) });
+    if (g.anim) Object.assign(out, { anim: g.anim, animExt: g.animExt, animIds: toRanges(tree.list(`versions/${g.anim}`, g.animExt)) });
+    if (g.animBack) Object.assign(out, { animBack: g.animBack, animBackIds: toRanges(tree.list(`versions/${g.animBack}`, g.animExt)) });
+    if (g.icon) Object.assign(out, { icon: g.icon, iconIds: toRanges(tree.list(`versions/${g.icon}`, "png")) });
+    return out;
+  });
 
   // Type chart (18 standard types)
   const typeList = [...typeIdentifiers.entries()].filter(([tid]) => Number(tid) <= 18).map(([tid, ident]) => ({ tid, ident }));
@@ -651,6 +877,8 @@ async function main() {
 
   fs.writeFileSync(path.join(OUT, "index.json"), JSON.stringify(index));
   fs.writeFileSync(path.join(OUT, "moves.json"), JSON.stringify(moveDict));
+  fs.writeFileSync(path.join(OUT, "forms.json"), JSON.stringify(formIndex));
+  fs.writeFileSync(path.join(OUT, "games.json"), JSON.stringify(games));
   fs.writeFileSync(
     path.join(OUT, "types.json"),
     JSON.stringify({ types: typeList.map((t) => ({ id: t.ident, name: typeNames.get(t.tid) ?? capitalize(t.ident) })), chart }),
@@ -676,7 +904,7 @@ async function main() {
   fs.mkdirSync(path.dirname(FUNCTIONS_OUT), { recursive: true });
   fs.writeFileSync(FUNCTIONS_OUT, JSON.stringify(facts));
 
-  log(`wrote ${index.length} species, ${Object.keys(moveDict).length} moves`);
+  log(`wrote ${index.length} species, ${formIndex.length} forms, ${Object.keys(moveDict).length} moves, ${games.length} games`);
   log(`coverage: ${JSON.stringify(coverage)} (TCG cards indexed: ${cardTotal})`);
 }
 

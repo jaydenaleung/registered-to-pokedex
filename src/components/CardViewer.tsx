@@ -5,13 +5,13 @@ import type { Card, SpeciesSummary } from "../lib/types";
 import { Img, useGhost } from "./basics";
 
 /** Official TCG card art (featured first) with ◀ n/N ▶, an artwork toggle and a lightbox. */
-export function CardViewer({ species, cards }: { species: SpeciesSummary; cards: Card[] }) {
+export function CardViewer({ species, cards, pid = species.id, name = species.name }: { species: SpeciesSummary; cards: Card[]; pid?: number; name?: string }) {
   const ghost = useGhost();
   const [i, setI] = useState(0);
   const [mode, setMode] = useState<"card" | "art">(cards.length ? "card" : "art");
   const [zoom, setZoom] = useState(false);
   const card = cards[i];
-  const sources = mode === "card" ? cardSources(card, species) : officialArt(species);
+  const sources = mode === "card" ? cardSources(card, species, pid) : officialArt(species, pid);
 
   useEffect(() => {
     if (!zoom) return;
@@ -21,7 +21,7 @@ export function CardViewer({ species, cards }: { species: SpeciesSummary; cards:
   }, [zoom]);
 
   const alt =
-    mode === "card" && card ? `${card.name} card from ${card.set}${card.artist ? `, illustrated by ${card.artist}` : ""}` : `${species.name} official artwork`;
+    mode === "card" && card ? `${card.name} card from ${card.set}${card.artist ? `, illustrated by ${card.artist}` : ""}` : `${name} official artwork`;
 
   return (
     <div className="cards">

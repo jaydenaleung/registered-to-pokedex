@@ -1,5 +1,5 @@
 /**
- * Cloud Functions for Registered-to-Pokédex (INSTRUCTIONS.md §6).
+ * Cloud Functions for Registered To Pokédex (INSTRUCTIONS.md §6).
  *
  * professorNotes({ dexId }): returns a short Claude-written field note for one species.
  * - Facts come only from the bundled species-facts.json (never from the client).

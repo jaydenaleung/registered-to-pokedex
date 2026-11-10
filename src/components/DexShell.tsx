@@ -1,5 +1,6 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { useGames } from "../lib/data";
 import { useSession } from "../lib/session";
 import type { SpeciesSummary } from "../lib/types";
 import { SearchBar } from "./SearchBar";
@@ -15,6 +16,7 @@ interface ShellProps {
   onRandom: () => void;
   onHome: () => void;
   randomHint: string;
+  themeStyle?: CSSProperties;
 }
 
 function isTyping(target: EventTarget | null) {
@@ -22,8 +24,9 @@ function isTyping(target: EventTarget | null) {
   return !!el && (/input|textarea|select/i.test(el.tagName) || el.isContentEditable);
 }
 
-export function DexShell({ children, index, pageLabel, onPrev, onNext, onRandom, onHome, randomHint }: ShellProps) {
-  const { user, authReady, signIn, sound, setSound, authError } = useSession();
+export function DexShell({ children, index, pageLabel, onPrev, onNext, onRandom, onHome, randomHint, themeStyle }: ShellProps) {
+  const { user, authReady, signIn, sound, setSound, authError, clearAuthError, gameId, setGameId } = useSession();
+  const { data: games } = useGames();
   const handlers = useRef({ onPrev, onNext, onRandom });
   handlers.current = { onPrev, onNext, onRandom };
 
@@ -44,7 +47,7 @@ export function DexShell({ children, index, pageLabel, onPrev, onNext, onRandom,
   const swipe = useRef<{ x: number; y: number } | null>(null);
 
   return (
-    <div className="dex">
+    <div className={`dex${gameId ? ` dex--game dex--${gameId}` : ""}`} style={themeStyle}>
       <header className="dex__top">
         <div className="dex__lights" aria-hidden="true">
           <span className="lens" />
@@ -52,11 +55,29 @@ export function DexShell({ children, index, pageLabel, onPrev, onNext, onRandom,
           <span className="led led--yellow" />
           <span className="led led--green" />
         </div>
-        <Link to="/" className="dex__title" aria-label="Pokédex home">
+        <Link to="/" className="dex__title" aria-label="Registered To Pokédex home">
+          <span className="dex__title-sub">REGISTERED TO</span>
           <span className="dex__title-main">POKéDEX</span>
-          <span className="dex__title-sub">REGISTERED · NATIONAL</span>
         </Link>
         <div className="dex__account">
+          <label className="game-select" title="Show every sprite, cry and Pokédex entry from one game">
+            <span>GAME</span>
+            <select value={gameId ?? ""} onChange={(e) => setGameId(e.target.value || null)}>
+              <option value="">Modern (all)</option>
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((gen) => {
+                const inGen = (games ?? []).filter((g) => g.gen === gen);
+                return inGen.length ? (
+                  <optgroup key={gen} label={`Generation ${gen}`}>
+                    {inGen.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} ({g.year})
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null;
+              })}
+            </select>
+          </label>
           <button
             type="button"
             className={`btn btn--small${sound ? " btn--on" : ""}`}
@@ -78,17 +99,25 @@ export function DexShell({ children, index, pageLabel, onPrev, onNext, onRandom,
           )}
         </div>
         {authError && (
-          <p className="dex__auth-error" role="alert">
-            {authError}
-          </p>
+          <div className="dex__auth-error textbox" role="alert">
+            <p>{authError}</p>
+            <button type="button" className="btn btn--small" onClick={clearAuthError}>
+              OK
+            </button>
+          </div>
         )}
       </header>
 
       <div className="dex__toolbar">
         <SearchBar index={index} />
-        <button type="button" className="btn btn--blue random-btn" onClick={onRandom} title={randomHint}>
-          RANDOM
-        </button>
+        <div className="toolbar-buttons">
+          <button type="button" className="btn btn--blue random-btn" onClick={onRandom} title={randomHint}>
+            RANDOM
+          </button>
+          <Link to="/battle" className="btn btn--red random-btn" title="Battle simulator (beta)">
+            BATTLE β
+          </Link>
+        </div>
       </div>
 
       <main

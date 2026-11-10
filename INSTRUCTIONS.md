@@ -1,4 +1,4 @@
-# Registered-to-Pokédex: Build Instructions
+# Registered To Pokédex: Build Instructions
 
 This file is the source of truth for the project. It turns the original request into a buildable spec, and the build follows it step by step (see [Build plan](#9-build-plan)).
 
@@ -72,6 +72,8 @@ Free text plus `key:value` tokens, combined with AND:
 | `caught` / `missing` | in / not in your caught log (signed in) |
 | `sort:popular` / `sort:unpopular` | by vote score ($\text{up} - \text{down}$) |
 | `sort:name`, `sort:bst`, `sort:catch` (hardest first), `sort:easy`, `sort:num` | other orders |
+| `alolan`, `galarian`, `hisuian`, `paldean`, `regional` | has that regional form (§13) |
+| `mega`, `gmax`, `primal`, `forms`, `form:<tag>` | has a Mega, Gigantamax, Primal or any alternate form |
 
 - The **Type / Gen / Sort dropdowns** next to the bar just rewrite tokens in the query, so the query string (`?q=`) is the only source of truth. That means searches are shareable and work with the back button.
 - **Enter** on an exact name or number jumps straight to that Pokémon's page.
@@ -282,7 +284,7 @@ Security comes from Firestore rules and authorised domains, not from hiding this
 
 ### 7.3 Console setup (one-time, by the project owner)
 
-1. Authentication → Sign-in method → enable **Google**. Then add the hosting domains (and `localhost`) under authorised domains.
+1. **Authentication → Get started** (this switches Firebase Auth on for the project; until then every sign-in fails with `CONFIGURATION_NOT_FOUND`), then Sign-in method → enable **Google**. Add any extra hosting domains under Settings → Authorized domains (`localhost`, `*.web.app` and `*.firebaseapp.com` are there by default).
 2. Firestore → create the database in **production mode**.
 3. Deploy the rules and hosting:
    ```bash
@@ -292,6 +294,8 @@ Security comes from Firestore rules and authorised domains, not from hiding this
    ```bash
    firebase deploy --only functions
    ```
+
+**Sign-in troubleshooting**: when a sign-in fails, the app asks Firebase Auth's public project endpoint what's wrong and shows a specific message: Auth not switched on, Google provider disabled, domain not authorised, pop-up blocked, or embedded browser.
 
 **Local development against emulators**: start them with `firebase emulators:start --only auth,firestore,functions`, then run `VITE_USE_EMULATORS=1 npm run dev`. The functions emulator reads `ANTHROPIC_API_KEY` from the gitignored `functions/.secret.local`.
 
@@ -310,13 +314,14 @@ tests/firestore.rules.test.ts  security-rule tests (npm run test:rules, Firestor
 index.html
 vite.config.ts  tsconfig*.json  package.json
 scripts/build-data.mjs data pipeline (§4)
-public/data/…          generated JSON (no images)
+public/data/…          generated JSON (no images): index, pokemon/{id}, moves, types, forms, games
 src/
   main.tsx  App.tsx
-  lib/      firebase, auth, data loading, search, typeChart, catchRate, sprites, votes, caught, aiNotes, age
+  lib/      firebase, session (auth + prefs), data loading, search, typeChart, catchRate, sprites (incl. game modes),
+            gameThemes, votes, caught, aiNotes, age, battle (engine), battleStore
   components/ DexShell, Book, SearchBar, PokemonTile, QuickLook, PokeballReveal, TypeBadge, Tag,
               StatBars, MoveTable, EvolutionTree, CardViewer, VoteButtons, CatchButton, ProfessorNotes…
-  pages/    IndexPage, PokemonPage, TrainerPage, NotFoundPage
+  pages/    IndexPage, PokemonPage, TrainerPage, BattlePage, NotFoundPage
   styles/   theme.css (tokens, device, pixel borders), book.css, components.css
 functions/
   src/index.ts       professorNotes callable (auth, validation, cache, lock)
@@ -354,3 +359,121 @@ functions/
 - [x] Signed-in users can vote (one vote each, changeable or removable) and can log, edit or release catches. The profile count updates live.
 - [x] No Pokémon images in the repo or database (only URLs; the one asset is a hand-drawn favicon). No Claude API key anywhere in the repo or bundle.
 - [x] Usable at 375 px width with no horizontal page scroll. Keyboard-navigable, with visible focus.
+
+---
+
+## 11. Game modes
+
+A **GAME** selector in the header switches the whole Pokédex to one game's graphics. The choice is remembered per browser.
+
+| Generation | Games |
+|------------|-------|
+| I | Red / Blue, Yellow |
+| II | Gold, Silver, Crystal |
+| III | Ruby / Sapphire, Emerald, FireRed / LeafGreen |
+| IV | Diamond / Pearl, Platinum, HeartGold / SoulSilver |
+| V | Black / White |
+| VI | X / Y, Omega Ruby / Alpha Sapphire |
+| VII | Ultra Sun / Ultra Moon, Let's Go Pikachu / Eevee |
+| VIII | Sword / Shield, Brilliant Diamond / Shining Pearl, Legends: Arceus |
+| IX | Scarlet / Violet, Legends: Z-A, Pokémon Champions |
+
+What a game mode changes:
+
+- **Sprites**: every sprite (index tiles, arena, evolution tree, search suggestions, trainer card, battle front/back) comes from that game's sprite set in PokeAPI/sprites.
+  - Animated where the game had animation: Crystal and Emerald idle animations, Gen IV two-frame animations, Black/White GIFs, and the animated 3D renders of Gen VII–IX.
+  - Gen VII–IX index tiles use the game's box icons, because the full renders are 0.5–1 MB each.
+  - Gen VI+ renders are scaled smoothly; older pixel sprites are scaled with hard pixels.
+- **Which Pokémon are listed**: the index, RANDOM, page flipping and the battle pickers only include Pokémon that have a sprite in that game. A page opened directly for an absent Pokémon shows the modern sprite with a "NOT IN …" label.
+- **Cries**: Gen I–V games use the original-era cries (PokeAPI `legacy` set, #1–649), with the current cries as fallback. Later games use the current cries.
+- **Pokédex text**: that game's own entries are listed first and marked **THIS GAME**.
+- **Device colours**: each game recolours the device (e.g. yellow for Yellow, black for Black/White) and its screen (Game Boy green for Gen I, Game Boy Color, GBA, DS and HD palettes after).
+
+Sprite availability is computed at build time from the sprites repository tree and stored as id ranges in `public/data/games.json`.
+
+---
+
+## 12. Battle simulator (beta)
+
+Route `/battle?p={pid}&o={pid}&lv={level}`, reachable from the header's **BATTLE β** button or any Pokémon page.
+
+- **Left page**: a Gen-style battle screen with the opponent's HP box and front sprite, your Pokémon's back sprite and HP box, and a text box. It has send-out, attack-lunge, hit-blink and faint animations.
+- **Right page, before battle**: pick your Pokémon and an opponent (any species or form, or RANDOM), the level (1–100), and up to 4 moves from the learnset.
+  - The default moveset picks the strongest damaging moves of different types, preferring STAB, then adds a support move if there's room.
+- **Right page, in battle**: a 2×2 FIGHT menu with PP, RUN, and a battle log. At the end come REMATCH, NEW OPPONENT and CHANGE MOVES.
+- **Opponent AI**: scores each move by expected damage (or the value of a heal, status or boost) and picks the best, with 15% randomness.
+
+### Mechanics
+
+Stats at level $L$ use perfect IVs, no EVs and a neutral nature:
+
+$$\text{HP} = \left\lfloor \frac{(2b + 31) L}{100} \right\rfloor + L + 10, \qquad \text{stat} = \left\lfloor \frac{(2b + 31) L}{100} \right\rfloor + 5$$
+
+Damage follows the Gen V+ formula:
+
+$$\text{damage} = \left\lfloor \left( \left\lfloor \frac{\left\lfloor \frac{2L}{5} + 2 \right\rfloor \cdot P \cdot \frac{A}{D}}{50} \right\rfloor + 2 \right) \cdot r \cdot S \cdot E \cdot C \cdot B \right\rfloor$$
+
+where:
+
+- $r \in [0.85, 1]$ is the random spread.
+- $S = 1.5$ for same-type attacks (STAB).
+- $E$ is the type multiplier from §5.1.
+- $C = 1.5$ on a critical hit. The crit chance is $\frac{1}{24}$, rising with high-crit moves.
+- $B = \frac{1}{2}$ for a burned Pokémon's physical moves.
+
+Stat stages scale a stat by
+
+$$m(s) = \begin{cases} \frac{2 + s}{2} & s \ge 0 \\ \frac{2}{2 - s} & s < 0 \end{cases}$$
+
+Also simulated:
+
+- accuracy, move priority, then Speed order (paralysis halves Speed)
+- multi-hit moves, drain and recoil, healing moves
+- stat-changing moves
+- paralysis, burn, poison, sleep and freeze, with type immunities
+- flinching
+- charge turns (Fly, Solar Beam …) and recharge turns (Hyper Beam …), and Focus Punch
+- one-hit KO moves, fixed-damage moves (Seismic Toss, Dragon Rage …) and variable-power moves (Low Kick, Gyro Ball …)
+
+Not yet simulated: abilities, held items, weather and terrain, switching, semi-invulnerable turns, confusion. Moves whose only effect isn't simulated are marked "no effect (beta)" in the move picker.
+
+The engine (`src/lib/battle.ts`) is pure and seedable, and is unit-tested (`src/lib/battle.test.ts`).
+
+---
+
+## 13. Alternate forms
+
+295 forms come from PokeAPI's Pokémon varieties:
+
+- 58 regional forms (Alolan, Galarian, Hisuian, Paldean)
+- 97 Mega Evolutions, including the Legends: Z-A Megas
+- 2 Primal Reversions
+- 34 Gigantamax forms
+- 104 other battle-relevant forms (Rotom appliances, Deoxys formes, Therian formes, Urshifu styles and so on)
+
+Event costumes, totem Pokémon and duplicate forms are left out.
+
+- **Pokémon page**: a **FORMS** row switches the page to that form (`/pokemon/26?form=10100`) without turning the page. The form changes:
+  - the title, sprite, cry, artwork and types
+  - weaknesses, base stats, abilities, height and weight
+  - the learnset (falling back to the species' learnset for Megas and Gigantamax)
+  - card art: Alolan, Galarian, Hisuian, Paldean and Mega cards where they exist
+  - It also adds a **FORM** tag, marked "in battle only" for Megas, Primals and Gigantamax.
+- **Quick look** lists a species' forms. Search finds them (§2.3), and every form can be used in battles.
+- **Data**: `public/data/forms.json` holds a summary per form. Each `pokemon/{id}.json` carries the forms' abilities, learnsets and cards.
+
+---
+
+## 14. Phase 2 build plan & checklist
+
+1. Extend the pipeline: forms, per-game sprite availability, Pokédex entries for every game, and move battle metadata (priority, effects, two-turn flags).
+2. Form switcher, form search and form-aware pages.
+3. Game modes: GAME selector, game-aware sprite helpers, cries, entry ordering, themes, and the game-limited dex.
+4. Sign-in: clear per-error messages plus a setup diagnosis. The root cause found was Authentication never being switched on (§7.3).
+5. Battle engine with unit tests, then the battle page.
+6. Rename to "Registered To Pokédex", then verify (tests, build, browser checks on desktop and at 375 px) and push.
+
+- [x] Forms switch everything on the page and are searchable.
+- [x] Every game in §11 changes sprites, cries, Pokédex text order, colours and the listed Pokémon.
+- [x] Sign-in failures show what's wrong and how to fix it.
+- [x] Battles run start to finish with the mechanics in §12, on desktop and phone.

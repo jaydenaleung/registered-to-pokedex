@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { dexNo, Img, Loading, PixelBall } from "../components/basics";
+import { dexNo, Loading, PixelBall, SpriteImg } from "../components/basics";
 import { romanGen, GEN_REGION } from "../lib/age";
 import { releaseCaught, type CaughtEntry } from "../lib/caught";
-import { useSession } from "../lib/session";
-import { staticSprites } from "../lib/sprites";
+import { useGame, useSession } from "../lib/session";
+import { tileSprites } from "../lib/sprites";
 import type { SpeciesSummary } from "../lib/types";
 
 const TOTAL = 1025;
@@ -102,6 +102,7 @@ export function TrainerLeft({ index }: { index: SpeciesSummary[] | undefined }) 
 export function TrainerRight() {
   const { user, caught, caughtStatus } = useSession();
   const [editing, setEditing] = useState<number | null>(null);
+  const game = useGame();
   if (!user) {
     return (
       <div className="page-pad page-pad--center">
@@ -132,7 +133,7 @@ export function TrainerRight() {
           .sort((a, b) => a.dexId - b.dexId)
           .map((e) => (
             <Link key={e.dexId} to={`/pokemon/${e.dexId}`} className="caught-grid__mon" title={`${dexNo(e.dexId)} ${e.name}`}>
-              <Img sources={staticSprites(e.dexId)} alt={e.name} width={56} height={56} loading="lazy" />
+              <SpriteImg set={tileSprites({ pid: e.dexId, anim: null }, game)} alt={e.name} size={56} />
               {e.shiny && <span className="caught-grid__shiny">★</span>}
             </Link>
           ))}

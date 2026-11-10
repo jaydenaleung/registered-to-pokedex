@@ -26,6 +26,8 @@ export interface ParsedQuery {
   weak: string[];
   caught: "caught" | "missing" | null;
   sort: SortKey | null;
+  /** Alternate-form tags the species must have ("alola", "mega", "regional", "any", …). */
+  forms: string[];
 }
 
 const REGIONS: Record<string, number> = {
@@ -38,6 +40,31 @@ const REGIONS: Record<string, number> = {
   alola: 7,
   galar: 8,
   paldea: 9,
+};
+
+/** Words that search for alternate forms. */
+const FORM_WORDS: Record<string, string> = {
+  alolan: "alola",
+  galarian: "galar",
+  hisuian: "hisui",
+  paldean: "paldea",
+  regional: "regional",
+  mega: "mega",
+  megas: "mega",
+  gmax: "gmax",
+  gigantamax: "gmax",
+  primal: "primal",
+  forms: "any",
+};
+
+const FORM_KEYS: Record<string, string> = {
+  alola: "alola",
+  galar: "galar",
+  hisui: "hisui",
+  paldea: "paldea",
+  ...FORM_WORDS,
+  any: "any",
+  other: "other",
 };
 
 const ROMAN: Record<string, number> = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9 };
@@ -108,6 +135,7 @@ export function parseQuery(q: string): ParsedQuery {
     weak: [],
     caught: null,
     sort: null,
+    forms: [],
   };
   for (const raw of tokenize(q)) {
     const token = raw.toLowerCase();
@@ -135,6 +163,10 @@ export function parseQuery(q: string): ParsedQuery {
       }
       if (key === "sort" || key === "s") {
         if (SORT_WORDS[value]) parsed.sort = SORT_WORDS[value];
+        continue;
+      }
+      if (key === "form" || key === "has") {
+        if (FORM_KEYS[value]) parsed.forms.push(FORM_KEYS[value]);
         continue;
       }
     }
@@ -170,6 +202,10 @@ export function parseQuery(q: string): ParsedQuery {
       parsed.flags.push(FLAG_WORDS[token]);
       continue;
     }
+    if (FORM_WORDS[token]) {
+      parsed.forms.push(FORM_WORDS[token]);
+      continue;
+    }
     if (token === "caught") {
       parsed.caught = "caught";
       continue;
@@ -198,7 +234,8 @@ export function isEmptyQuery(p: ParsedQuery): boolean {
     !p.flags.length &&
     !p.weak.length &&
     !p.caught &&
-    !p.sort
+    !p.sort &&
+    !p.forms.length
   );
 }
 
@@ -206,6 +243,15 @@ export interface QueryContext {
   chart?: TypeData["chart"];
   votes?: Map<number, VoteTally>;
   caught?: Set<number>;
+}
+
+const REGIONAL_TAGS = ["alola", "galar", "hisui", "paldea"];
+
+function hasForm(s: SpeciesSummary, tag: string): boolean {
+  const tags = s.forms ?? [];
+  if (tag === "any") return tags.length > 0;
+  if (tag === "regional") return tags.some((t) => REGIONAL_TAGS.includes(t));
+  return tags.includes(tag);
 }
 
 export const bst = (s: SpeciesSummary) => s.stats.reduce((a, b) => a + b, 0);
@@ -226,6 +272,7 @@ export function applyQuery(list: SpeciesSummary[], p: ParsedQuery, ctx: QueryCon
     if (p.weak.length && ctx.chart && !p.weak.every((t) => isWeakTo(t, s.types, ctx.chart!))) return false;
     if (p.caught === "caught" && !ctx.caught?.has(s.id)) return false;
     if (p.caught === "missing" && ctx.caught?.has(s.id)) return false;
+    if (p.forms.length && !p.forms.every((f) => hasForm(s, f))) return false;
     return true;
   });
 

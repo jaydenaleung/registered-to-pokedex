@@ -113,6 +113,17 @@ describe("search", () => {
     expect(run("weak:ice").map((s) => s.name)).not.toContain("Pikachu");
   });
 
+  it("finds alternate forms", () => {
+    const alolan = run("alolan").map((s) => s.name);
+    expect(alolan).toContain("Raichu");
+    expect(alolan).not.toContain("Pikachu");
+    expect(run("galarian").map((s) => s.name)).toContain("Meowth");
+    expect(run("mega kanto").map((s) => s.name)).toContain("Charizard");
+    expect(run("gmax").map((s) => s.name)).toContain("Pikachu");
+    expect(run("form:regional gen:1").every((s) => s.gen === 1)).toBe(true);
+    expect(run("alola")).toEqual(run("gen:7")); // region names still mean generations
+  });
+
   it("sorts", () => {
     expect(run("sort:catch")[0].capture).toBe(3);
     expect(run("sort:bst")[0].name).toBe("Arceus");

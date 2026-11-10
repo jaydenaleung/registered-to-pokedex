@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useSession } from "../lib/session";
-import { animatedSprite, cryUrl, staticSprites } from "../lib/sprites";
-import type { SpeciesSummary } from "../lib/types";
-import { Img, PixelBall, useGhost } from "./basics";
+import { useGame, useSession } from "../lib/session";
+import { arenaSprites, cryUrls } from "../lib/sprites";
+import type { GameDef, Mon } from "../lib/types";
+import { PixelBall, SpriteImg, useGhost } from "./basics";
 
 /**
  * Pokéball throw (INSTRUCTIONS.md §2.5): arc in → bounce → wobble → pop open with a
@@ -19,19 +19,27 @@ function reducedMotion() {
   return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 }
 
-export function playCry(id: number) {
-  try {
-    const audio = new Audio(cryUrl(id));
-    audio.volume = 0.35;
-    void audio.play().catch(() => undefined);
-  } catch {
-    /* audio unsupported */
-  }
+/** Plays a cry, trying the selected game's cry first and falling back to the current one. */
+export function playCry(pid: number, game: GameDef | null = null) {
+  const urls = cryUrls(pid, game);
+  const tryAt = (i: number) => {
+    if (i >= urls.length) return;
+    try {
+      const audio = new Audio(urls[i]);
+      audio.volume = 0.35;
+      audio.addEventListener("error", () => tryAt(i + 1), { once: true });
+      void audio.play().catch(() => undefined);
+    } catch {
+      /* audio unsupported */
+    }
+  };
+  tryAt(0);
 }
 
-export function PokeballReveal({ species, playKey }: { species: SpeciesSummary; playKey: number }) {
+export function PokeballReveal({ mon, playKey }: { mon: Mon; playKey: number }) {
   const ghost = useGhost();
   const { sound } = useSession();
+  const game = useGame();
   const skip = ghost || reducedMotion();
   const [phase, setPhase] = useState<Phase>(skip ? "done" : "throw");
 
@@ -43,23 +51,22 @@ export function PokeballReveal({ species, playKey }: { species: SpeciesSummary; 
     setPhase("throw");
     const open = setTimeout(() => {
       setPhase("open");
-      if (sound) playCry(species.id);
+      if (sound) playCry(mon.pid, game);
     }, OPEN_AT);
     const done = setTimeout(() => setPhase("done"), DONE_AT);
     return () => {
       clearTimeout(open);
       clearTimeout(done);
     };
-    // `sound` is read at throw time on purpose; toggling it shouldn't re-throw.
+    // `sound`/`game` are read at throw time on purpose; toggling them shouldn't re-throw.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [species.id, playKey, skip]);
+  }, [mon.pid, playKey, skip]);
 
-  const anim = animatedSprite(species);
-  const sprites = staticSprites(species.id);
-  const sources = phase === "done" && anim ? [anim, ...sprites] : sprites;
+  const sprite = arenaSprites(mon, game);
+  const variant = sprite.fit ? "fit" : phase === "done" && sprite.active ? (mon.anim ?? "bw") : "bw";
 
   return (
-    <div className={`arena arena--${phase}`} aria-label={`${species.name} battle arena`}>
+    <div className={`arena arena--${phase}`} aria-label={`${mon.name} battle arena`}>
       <div className="arena__sky" aria-hidden="true" />
       <div className="arena__platform" aria-hidden="true" />
       {phase !== "done" && (
@@ -81,13 +88,15 @@ export function PokeballReveal({ species, playKey }: { species: SpeciesSummary; 
         </div>
       )}
       <div className="mon">
-        <Img
-          className={`mon__sprite mon__sprite--${anim && phase === "done" ? species.anim : "bw"}`}
-          sources={sources}
-          alt={species.name}
-          fallback={<span className="mon__missing">?</span>}
+        <SpriteImg
+          set={sprite}
+          active={phase === "done"}
+          className={`mon__sprite mon__sprite--${variant}`}
+          alt={mon.name}
+          eager
         />
       </div>
+      {game && sprite.missing && <span className="arena__note">NOT IN {game.name.toUpperCase()}</span>}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useReducer } from "react";
-import type { MoveDict, SpeciesDetail, SpeciesSummary, TypeData } from "./types";
+import type { FormSummary, GameDef, MoveDict, SpeciesDetail, SpeciesSummary, TypeData } from "./types";
 
 /**
  * Tiny resource cache for the static JSON in /data. Values that are already loaded
@@ -69,10 +69,14 @@ export const loadIndex = () => fetchJson<SpeciesSummary[]>(`${BASE}/index.json`)
 export const loadTypes = () => fetchJson<TypeData>(`${BASE}/types.json`);
 export const loadMoves = () => fetchJson<MoveDict>(`${BASE}/moves.json`);
 export const loadDetail = (id: number) => fetchJson<SpeciesDetail>(`${BASE}/pokemon/${id}.json`);
+export const loadForms = () => fetchJson<FormSummary[]>(`${BASE}/forms.json`);
+export const loadGames = () => fetchJson<GameDef[]>(`${BASE}/games.json`);
 
 export const useIndex = () => useResource("index", loadIndex);
 export const useTypes = () => useResource("types", loadTypes);
 export const useMoves = () => useResource("moves", loadMoves);
+export const useForms = () => useResource("forms", loadForms);
+export const useGames = () => useResource("games", loadGames);
 export const useDetail = (id: number | null) =>
   useResource(id ? `detail:${id}` : null, () => loadDetail(id as number));
 
@@ -84,4 +88,14 @@ export function prefetchDetail(id: number) {
 export function prefetchCore() {
   load("index", loadIndex);
   load("types", loadTypes);
+  load("forms", loadForms);
+  load("games", loadGames);
+}
+
+/** Load a resource outside React (e.g. the battle simulator). */
+export function fetchResource<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const entry = load(key, loader);
+  if (entry.status === "ok") return Promise.resolve(entry.value);
+  if (entry.status === "error") return Promise.reject(entry.error);
+  return entry.promise;
 }

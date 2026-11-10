@@ -1,13 +1,15 @@
 import { Link } from "react-router-dom";
-import { staticSprites } from "../lib/sprites";
+import { useGame } from "../lib/session";
+import { tileSprites } from "../lib/sprites";
 import type { EvoNode } from "../lib/types";
-import { dexNo, Img } from "./basics";
+import { dexNo, SpriteImg } from "./basics";
 
 function Node({ node, current }: { node: EvoNode; current: number }) {
+  const game = useGame();
   return (
     <div className="evo__branch">
       <Link to={`/pokemon/${node.id}`} className={`evo__mon${node.id === current ? " is-current" : ""}`} aria-current={node.id === current ? "page" : undefined}>
-        <Img sources={staticSprites(node.id)} alt="" width={64} height={64} loading="lazy" />
+        <SpriteImg set={tileSprites({ pid: node.id, anim: null }, game)} size={64} />
         <span className="evo__no">{dexNo(node.id)}</span>
         <span className="evo__name">{node.name}</span>
       </Link>

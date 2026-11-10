@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { CardViewer } from "../components/CardViewer";
 import { CatchButton } from "../components/CatchLog";
 import { EvolutionTree } from "../components/EvolutionTree";
@@ -10,22 +11,78 @@ import { VoteButtons } from "../components/VoteButtons";
 import { dexNo, Img, Loading, Tag, TypeBadge, useGhost } from "../components/basics";
 import { ageYears, debutYear, regionFor, romanGen } from "../lib/age";
 import { catchScenarios, catchTier, formatPercent } from "../lib/catchRate";
-import { prefetchDetail, useDetail, useTypes } from "../lib/data";
-import { originalSprite } from "../lib/sprites";
+import { prefetchDetail, useDetail, useForms, useTypes } from "../lib/data";
+import { useGame } from "../lib/session";
+import { formMon, originalSprite, speciesMon } from "../lib/sprites";
 import { defensiveProfile } from "../lib/typeChart";
-import type { SpeciesDetail, SpeciesSummary } from "../lib/types";
+import type { FormSummary, SpeciesDetail, SpeciesSummary } from "../lib/types";
 
 interface Props {
   species: SpeciesSummary;
+  /** Selected alternate form (PokeAPI pokemon id), or null for the default form. */
+  formPid: number | null;
+}
+
+const KIND_ORDER = { regional: 0, mega: 1, primal: 2, gmax: 3, other: 4 } as const;
+
+/** Everything a page needs about the species *as currently shown* (default or alternate form). */
+function useEntry(species: SpeciesSummary, formPid: number | null) {
+  const { data: forms } = useForms();
+  const { data: detail, error } = useDetail(species.id);
+  return useMemo(() => {
+    const speciesForms = (forms ?? [])
+      .filter((f) => f.species === species.id)
+      .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.pid - b.pid);
+    const form = formPid ? (speciesForms.find((f) => f.pid === formPid) ?? null) : null;
+    const formDetail = form ? detail?.forms?.find((f) => f.pid === form.pid) : undefined;
+    return {
+      mon: form ? formMon(form) : speciesMon(species),
+      form,
+      speciesForms,
+      detail,
+      error,
+      abilities: formDetail?.abilities ?? detail?.abilities,
+      moves: formDetail?.moves ?? detail?.moves ?? null,
+      cards: formDetail?.cards.length ? formDetail.cards : (detail?.cards ?? []),
+    };
+  }, [forms, detail, error, species, formPid]);
+}
+
+function FormSwitcher({ species, forms, current, defaultLabel }: { species: SpeciesSummary; forms: FormSummary[]; current: number | null; defaultLabel: string }) {
+  const navigate = useNavigate();
+  const ghost = useGhost();
+  if (!forms.length) return null;
+  const go = (pid: number | null) => !ghost && navigate(`/pokemon/${species.id}${pid ? `?form=${pid}` : ""}`, { replace: true });
+  return (
+    <div className="forms" role="group" aria-label="Forms">
+      <span className="forms__label">FORMS</span>
+      <button type="button" className={`forms__chip${current === null ? " is-on" : ""}`} aria-pressed={current === null} onClick={() => go(null)}>
+        {defaultLabel}
+      </button>
+      {forms.map((f) => (
+        <button
+          key={f.pid}
+          type="button"
+          className={`forms__chip forms__chip--${f.kind}${current === f.pid ? " is-on" : ""}`}
+          aria-pressed={current === f.pid}
+          onClick={() => go(f.pid)}
+          title={f.name}
+        >
+          {f.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 // ------------------------------------------------------------------ left page
 
-export function PokemonLeft({ species }: Props) {
+export function PokemonLeft({ species, formPid }: Props) {
   const ghost = useGhost();
-  const { data: detail, error } = useDetail(species.id);
+  const game = useGame();
+  const { mon, form, speciesForms, detail, error, cards } = useEntry(species, formPid);
   const [playKey, setPlayKey] = useState(0);
-  const original = originalSprite(species.id);
+  const original = !game && !form ? originalSprite(species.id) : null;
 
   useEffect(() => {
     if (ghost) return;
@@ -37,18 +94,23 @@ export function PokemonLeft({ species }: Props) {
     <div className="mon-page">
       <header className="title-strip">
         <span className="title-strip__no">{dexNo(species.id)}</span>
-        <h1 className="title-strip__name">{species.name.toUpperCase()}</h1>
+        <h1 className="title-strip__name">{mon.name.toUpperCase()}</h1>
         <span className="title-strip__genus">{species.genus}</span>
       </header>
 
-      <PokeballReveal species={species} playKey={playKey} />
+      <FormSwitcher species={species} forms={speciesForms} current={form?.pid ?? null} defaultLabel={detail?.formLabel ?? species.name} />
+
+      <PokeballReveal mon={mon} playKey={playKey} />
       <div className="arena-controls">
         <button type="button" className="btn btn--small" onClick={() => setPlayKey((k) => k + 1)} title="Throw the ball again">
           THROW AGAIN
         </button>
-        <button type="button" className="btn btn--small" onClick={() => playCry(species.id)} title="Play its cry">
+        <button type="button" className="btn btn--small" onClick={() => playCry(mon.pid, game)} title="Play its cry">
           CRY
         </button>
+        <Link className="btn btn--small btn--blue" to={`/battle?p=${mon.pid}`} title="Battle with this Pokémon (beta)">
+          BATTLE β
+        </Link>
         {original && (
           <span className="original-sprite" title="Original 1996 Red/Blue sprite">
             <Img sources={[original]} alt={`${species.name} original Red/Blue sprite`} width={56} height={56} />
@@ -60,7 +122,7 @@ export function PokemonLeft({ species }: Props) {
       {error ? (
         <p className="body-text">Couldn't load this entry.</p>
       ) : detail ? (
-        <CardViewer species={species} cards={detail.cards} />
+        <CardViewer key={mon.pid} species={species} cards={cards} pid={mon.pid} name={mon.name} />
       ) : (
         <Loading />
       )}
@@ -81,9 +143,16 @@ function genderText(rate: number) {
   return `♂ ${100 - female}% · ♀ ${female}%`;
 }
 
-function TagCloud({ species, detail }: { species: SpeciesSummary; detail: SpeciesDetail | undefined }) {
+interface TagCloudProps {
+  species: SpeciesSummary;
+  detail: SpeciesDetail | undefined;
+  form: FormSummary | null;
+  view: { types: string[]; height: number; weight: number; abilities: SpeciesDetail["abilities"] | undefined };
+}
+
+function TagCloud({ species, detail, form, view }: TagCloudProps) {
   const { data: types } = useTypes();
-  const profile = types ? defensiveProfile(species.types, types.chart) : null;
+  const profile = types ? defensiveProfile(view.types, types.chart) : null;
   const tier = catchTier(species.capture);
   const year = debutYear(species.id, species.gen);
   const klass = species.mythical ? "MYTHICAL" : species.legendary ? "LEGENDARY" : species.baby ? "BABY" : "REGULAR";
@@ -91,10 +160,16 @@ function TagCloud({ species, detail }: { species: SpeciesSummary; detail: Specie
   return (
     <div className="tag-cloud">
       <Tag label="TYPE">
-        {species.types.map((t) => (
+        {view.types.map((t) => (
           <TypeBadge key={t} type={t} />
         ))}
       </Tag>
+      {form && (
+        <Tag label="FORM" tone={form.kind === "mega" || form.kind === "primal" ? "gold" : undefined}>
+          {form.label.toUpperCase()}
+          {form.battleOnly ? <small>(in battle only)</small> : null}
+        </Tag>
+      )}
       <Tag label="GEN">
         {romanGen(species.gen)} · {regionFor(species.id, species.gen).toUpperCase()}
       </Tag>
@@ -113,7 +188,7 @@ function TagCloud({ species, detail }: { species: SpeciesSummary; detail: Specie
         {tier.label.toUpperCase()} <small>({species.capture}/255)</small>
       </Tag>
       <Tag label="HT / WT">
-        {(species.height / 10).toFixed(1)} m · {(species.weight / 10).toFixed(1)} kg
+        {(view.height / 10).toFixed(1)} m · {(view.weight / 10).toFixed(1)} kg
       </Tag>
       {profile && (profile.quad.length > 0 || profile.double.length > 0) && (
         <Tag label="WEAK">
@@ -145,7 +220,7 @@ function TagCloud({ species, detail }: { species: SpeciesSummary; detail: Specie
       {detail && (
         <>
           <Tag label="ABILITIES">
-            {detail.abilities.map((a) => (
+            {(view.abilities ?? detail.abilities).map((a) => (
               <span key={a.name} className="chip" title={a.description}>
                 {a.name}
                 {a.hidden ? <em> (H)</em> : null}
@@ -180,15 +255,28 @@ function CatchOdds({ capture }: { capture: number }) {
   );
 }
 
-export function PokemonRight({ species }: Props) {
-  const { data: detail, error } = useDetail(species.id);
+export function PokemonRight({ species, formPid }: Props) {
+  const { mon, form, detail, error, abilities, moves } = useEntry(species, formPid);
+  const game = useGame();
   const [tab, setTab] = useState<TabName>("LORE");
   const [allEntries, setAllEntries] = useState(false);
-  const entries = detail ? (allEntries ? detail.flavor : detail.flavor.slice(0, 5)) : [];
+  // In a game mode, that game's own Pokédex entries come first.
+  const flavor = useMemo(() => {
+    if (!detail) return [];
+    if (!game) return detail.flavor.map((f) => ({ ...f, thisGame: false }));
+    const mark = detail.flavor.map((f) => ({ ...f, thisGame: f.games.some((g) => game.versions.includes(g)) }));
+    return [...mark.filter((f) => f.thisGame), ...mark.filter((f) => !f.thisGame)];
+  }, [detail, game]);
+  const entries = allEntries ? flavor : flavor.slice(0, 5);
 
   return (
     <div className="mon-page mon-page--right">
-      <TagCloud species={species} detail={detail} />
+      <TagCloud
+        species={species}
+        detail={detail}
+        form={form}
+        view={{ types: mon.types, height: mon.height, weight: mon.weight, abilities }}
+      />
       <div className="action-row">
         <VoteButtons dexId={species.id} name={species.name} />
         <CatchButton species={species} />
@@ -220,8 +308,11 @@ export function PokemonRight({ species }: Props) {
             {detail.flavor.length ? (
               <ul className="dex-entries">
                 {entries.map((f, i) => (
-                  <li key={i}>
-                    <span className="dex-entries__games">{f.games.slice(0, 4).join(" · ")}</span>
+                  <li key={i} className={f.thisGame ? "is-this-game" : undefined}>
+                    <span className="dex-entries__games">
+                      {f.thisGame && <b>THIS GAME · </b>}
+                      {f.games.slice(0, 4).join(" · ")}
+                    </span>
                     <p className="body-text">{f.text}</p>
                   </li>
                 ))}
@@ -229,9 +320,9 @@ export function PokemonRight({ species }: Props) {
             ) : (
               <p className="body-text dim">No Pokédex entries yet.</p>
             )}
-            {detail.flavor.length > 5 && (
+            {flavor.length > 5 && (
               <button type="button" className="btn btn--small" onClick={() => setAllEntries(!allEntries)}>
-                {allEntries ? "SHOW FEWER" : `SHOW ALL ${detail.flavor.length} ENTRIES`}
+                {allEntries ? "SHOW FEWER" : `SHOW ALL ${flavor.length} ENTRIES`}
               </button>
             )}
           </div>
@@ -239,11 +330,11 @@ export function PokemonRight({ species }: Props) {
         {detail && tab === "STATS" && (
           <div>
             <h3 className="section-title">BASE STATS</h3>
-            <StatBars stats={species.stats} />
+            <StatBars stats={mon.stats} />
             <CatchOdds capture={species.capture} />
             <h3 className="section-title">ABILITIES</h3>
             <dl className="abilities">
-              {detail.abilities.map((a) => (
+              {(abilities ?? detail.abilities).map((a) => (
                 <div key={a.name}>
                   <dt>
                     {a.name}
@@ -258,7 +349,7 @@ export function PokemonRight({ species }: Props) {
             </p>
           </div>
         )}
-        {detail && tab === "MOVES" && <MoveTable learnset={detail.moves} />}
+        {detail && tab === "MOVES" && <MoveTable learnset={moves} />}
         {detail && tab === "EVOLUTION" && <EvolutionTree tree={detail.evolution} current={species.id} />}
       </div>
     </div>
