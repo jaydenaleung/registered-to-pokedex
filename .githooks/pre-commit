@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks commits that contain API keys or other credentials (see scripts/check-secrets.mjs).
+exec node scripts/check-secrets.mjs --staged

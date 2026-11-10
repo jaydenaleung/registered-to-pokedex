@@ -26,12 +26,23 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. The Pokémon data in `public/data/` is already generated and committed, so the app runs without any setup.
+Open http://localhost:5173. The Pokémon data in `public/data/` is already generated and committed, so browsing works without any setup.
+
+### Firebase config (needed for sign-in, votes and catch logs)
+
+No keys are kept in this repository. Copy the template:
+
+```bash
+cp .env.example .env.local
+```
+
+Fill in `.env.local` from Firebase console → Project settings → General → Your apps → *SDK setup and configuration*. `.env.local` is gitignored. `npm run dev` and `npm run build` read it automatically.
 
 | Command | What it does |
 |---------|--------------|
-| `npm run dev` | Start the dev server (uses the live Firebase project) |
-| `npm test` | Run unit tests: search grammar, type chart, catch odds, data integrity |
+| `npm run dev` | Start the dev server (uses the Firebase project in `.env.local`) |
+| `npm test` | Run unit tests (search, type chart, catch odds, battles, data integrity) and the secret scan |
+| `npm run check:secrets` | Scan every tracked file for API keys and credentials. The same check runs as a pre-commit hook. |
 | `npm run build` | Typecheck and build to `dist/` |
 | `npm run data` | Rebuild `public/data/` from PokeAPI and PokemonTCG data on GitHub (add `-- --refresh` to re-download) |
 | `npm run test:rules` | Run the Firestore security-rule tests in the emulator. Needs `firebase-tools` and Java. |
@@ -53,7 +64,7 @@ npm --prefix functions install && npm --prefix functions run build
 Start the emulators:
 
 ```bash
-firebase emulators:start --only auth,firestore,functions
+firebase emulators:start --only auth,firestore,functions --project demo-registered-pokedex
 ```
 
 In a second terminal, start the dev server pointed at the emulators:
@@ -70,7 +81,7 @@ The functions emulator reads the Claude key from `functions/.secret.local` (giti
    - **Authentication → Get started**, then Sign-in method → enable **Google**. Sign-in fails with "Sign-in isn't switched on" until this is done.
    - Add any custom domain under Authentication → Settings → *Authorized domains*. `localhost`, `*.web.app` and `*.firebaseapp.com` are allowed by default.
    - Firestore → create the database in **production mode**. Votes only work once the rules below are deployed.
-2. Deploy the rules and the site:
+2. Fill in `.env.local` (see *Firebase config* above), then deploy the rules and the site:
    ```bash
    firebase login
    ```
@@ -87,7 +98,9 @@ The functions emulator reads the Claude key from `functions/.secret.local` (giti
    ```
    Without the function deployed, the rest of the app still works, and the notes panel says the Professor is away.
 
-> **Security:** the Claude API key must never be committed or shipped to the browser. It lives only in Firebase Secret Manager. The Firebase web config in `src/lib/firebase.ts` is public by design. Access is enforced by `firestore.rules`, which the tests in `tests/` cover.
+> **Security:** no keys live in this repo. The Firebase web config goes in `.env.local`, and the Claude API key lives only in Firebase Secret Manager. `npm test` and the pre-commit hook fail if a key is ever committed.
+>
+> The Firebase API key is still embedded in the built site, because browsers need it. Restrict it to your domains and the Firebase APIs in Google Cloud console → APIs & Services → Credentials (INSTRUCTIONS.md §7.1). Data access is enforced by `firestore.rules`, which the tests in `tests/` cover.
 
 ## Credits
 

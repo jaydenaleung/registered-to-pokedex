@@ -11,7 +11,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "data": "node scripts/build-data.mjs",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-registered-pokedex \"vitest run --config vitest.rules.config.ts\""
+    "test:rules": "firebase emulators:exec --only firestore --project demo-registered-pokedex \"vitest run --config vitest.rules.config.ts\"",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "engines": {
     "node": ">=20"
